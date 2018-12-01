@@ -21,13 +21,6 @@ const (
 	ePayDemoURL = "https://demo.epay.bg/"
 )
 
-// API provides functionality to communicate with ePay
-type API struct {
-	url    string
-	cin    string
-	secret string
-}
-
 // PaymentRequest represents a payment request for a client
 type PaymentRequest struct {
 	mu sync.RWMutex
@@ -40,7 +33,7 @@ type PaymentRequest struct {
 	checksum string
 
 	// Currency is the currency used for this payment request
-	Currency PaymentCurrency // BGN, EUR or USD
+	Currency Currency // BGN, EUR or USD
 
 	// Amount is the sum requested of the clinet
 	Amount float64
@@ -61,7 +54,7 @@ type PaymentRequest struct {
 	URLCancel string
 
 	// Language is the language in which the epay interface will be shown to the user
-	Language PaymentLanguage // en or bg
+	Language Language // en or bg
 }
 
 // encode validates all required fields and then sets the value of encoded
@@ -133,6 +126,14 @@ func (p *PaymentRequest) CalcChecksum(secret string) error {
 	return nil
 }
 
+// API provides functionality to communicate with ePay
+type API struct {
+	url             string
+	cin             string
+	secret          string
+	defaultLanguage Language
+}
+
 // PaymentOption is a custom function type used for setting optional fields of PaymentRequest
 type PaymentOption func(*PaymentRequest) error
 
@@ -148,48 +149,83 @@ func WithExpirationTime(t time.Time) PaymentOption {
 	}
 }
 
-// PaymentLanguage is a custom type to ensure a valid language is provided and set on a PaymentRequest
-type PaymentLanguage string
+// Language is a custom type to ensure a valid language is provided and set on a PaymentRequest
+type Language string
 
 // String implements the Stringer interface
-func (p PaymentLanguage) String() string {
-	return string(p)
+func (l Language) String() string {
+	return string(l)
+}
+
+// LanguageFromString converts a string to it's corresponding language
+func LanguageFromString(l string) (Language, error) {
+	lang := strings.Trim(strings.ToLower(l), " ")
+	switch lang {
+	case "english"
+	case "eng":
+	case "en":
+		return English, nil
+	case "български":
+	case "бг":
+	case "bulgarian":
+	case "bul":
+	case "bg":
+		return Bulgarian, nil
+	default:
+		return Language(""), fmt.Errorf("unsupported language")
+	}
 }
 
 var (
 	// English is used to change the ePay client interface to English
-	English PaymentLanguage = "en"
+	English Language = "en"
 	// Bulgarian is used to change the ePay client interface to Bulgarian
-	Bulgarian PaymentLanguage = "bg"
+	Bulgarian Language = "bg"
 )
 
 // WithLanguage overrides the default language of a PaymentRequest
-func WithLanguage(l PaymentLanguage) PaymentOption {
+func WithLanguage(l Language) PaymentOption {
 	return func(p *PaymentRequest) error {
 		p.Language = l
 		return nil
 	}
 }
 
-// PaymentCurrency is a custom type to ensure a valid currency is provided and set on a PaymentRequest
-type PaymentCurrency string
+// Currency is a custom type to ensure a valid currency is provided and set on a PaymentRequest
+type Currency string
 
 // String implements the Stringer interface
-func (p PaymentCurrency) String() string {
+func (p Currency) String() string {
 	return string(p)
+}
+
+// CurrencyFromString converts a string to it's corresponding currency
+func CurrencyFromString(c string) (Currency, error) {
+	curr := strings.Trim(strings.ToLower(c), " ")
+	switch(curr) {
+	case "euro":
+	case "eur":
+		return EUR, nil
+	case "bgn":
+		return BGN, nil
+	case "usd":
+		return USD, nil
+	default:
+		return Currency(""), fmt.Errorf("unsupported currrency")
+	}
 }
 
 var (
 	// EUR means Euro
-	EUR PaymentCurrency = "EUR"
+	EUR Currency = "EUR"
 	// BGN means Bulgarian lev
-	BGN PaymentCurrency = "BGN"
+	BGN Currency = "BGN"
 	// USD means United Status Dollar
-	USD PaymentCurrency = "USD"
+	USD Currency = "USD"
 )
 
 // WithCurrency overrides the default currency of a PaymentRequest
-func WithCurrency(c PaymentCurrency) PaymentOption {
+func WithCurrency(c Currency) PaymentOption {
 	return func(p *PaymentRequest) error {
 		p.Currency = c
 		return nil
@@ -307,36 +343,31 @@ func (api *API) PaymentRequestHandler(w http.ResponseWriter, r *http.Request) {
 	options := []PaymentOption{}
 
 	// Get the optional language
-	switch strings.ToLower(r.FormValue("language")) {
-	// Default language is English
-	case "":
-	case "en":
-		options = append(options, WithLanguage(English))
-	case "bg":
-		options = append(options, WithLanguage(Bulgarian))
-	// Invalid language option
-	default:
+	l := r.FormValue("language")
+	if l == "" {
+		l = "en"
+	}
+	
+	lang, err := LanguageFromString(l)
+	if err != nil {
 		http.Error(w, "invalid language", http.StatusInternalServerError)
 		return
 	}
+	append(options, WithLanguage(lang))
+
 
 	// Get the optional currency
-	switch strings.ToLower(r.FormValue("currency")) {
-	// Default currency is Euro
-	case "":
-	case "eur":
-		options = append(options, WithCurrency(EUR))
-	// Bulgarian lev
-	case "bgn":
-		options = append(options, WithCurrency(BGN))
-	// United States Dollar
-	case "usd":
-		options = append(options, WithCurrency(USD))
-	// Invalid currency option
-	default:
+	c := r.FormValue("currency")
+	if c == "" {
+		c = "eur"
+	}
+
+	curr, err := CurrencyFromString(c)
+	if err != nil {
 		http.Error(w, "invalid currency", http.StatusInternalServerError)
 		return
 	}
+	options = append(options, WithCurrency(curr))
 
 	// Get the optional type
 	switch strings.ToLower(r.FormValue("type")) {
